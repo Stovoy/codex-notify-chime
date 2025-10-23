@@ -31,42 +31,68 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let notification_json = std::env::args().nth(1).ok_or_else(|| {
-        String::from(
-            "Usage: codex-notify-chime <NOTIFICATION_JSON>\n\
-             Expected Codex to invoke this binary with a single JSON argument.",
-        )
-    })?;
+    let (notification_json, verbose) = parse_args()?;
 
     let notification: Notification = serde_json::from_str(&notification_json)
         .map_err(|err| format!("Failed to parse notify payload as JSON: {err}"))?;
 
-    play_sound_for_event(&notification)?;
+    play_sound_for_event(&notification, verbose)?;
     Ok(())
 }
 
-fn play_sound_for_event(notification: &Notification) -> Result<(), Box<dyn Error>> {
+fn parse_args() -> Result<(String, bool), String> {
+    let mut args = std::env::args().skip(1).peekable();
+    let mut verbose = false;
+
+    if matches!(args.peek(), Some(flag) if flag.as_str() == "--verbose") {
+        verbose = true;
+        args.next();
+    }
+
+    let notification_json = args.next().ok_or_else(|| {
+        String::from(
+            "Usage: codex-notify-chime [--verbose] <NOTIFICATION_JSON>\n\
+             Expected Codex to invoke this binary with a single JSON argument.",
+        )
+    })?;
+
+    if args.next().is_some() {
+        return Err(String::from(
+            "Usage: codex-notify-chime [--verbose] <NOTIFICATION_JSON>\n\
+             Expected Codex to invoke this binary with a single JSON argument.",
+        ));
+    }
+
+    Ok((notification_json, verbose))
+}
+
+fn play_sound_for_event(
+    notification: &Notification,
+    verbose: bool,
+) -> Result<(), Box<dyn Error>> {
     let event_type = notification.kind.as_str();
 
-    if event_type != "agent-turn-complete" {
+    if verbose && event_type != "agent-turn-complete" {
         eprintln!("Codex notify event '{event_type}' is not recognized; using default sound");
     }
 
-    if let Some(last_message) = &notification.last_assistant_message {
-        println!("Codex notify ({event_type}): {last_message}");
-    } else if let Some(inputs) = &notification.input_messages {
-        println!("Codex notify ({event_type}): {}", inputs.join(" "));
-    } else if let Some(thread_id) = &notification.thread_id {
-        println!("Codex notify ({event_type}) for thread {thread_id}");
-    } else {
-        println!("Codex notify ({event_type})");
+    if verbose {
+        if let Some(last_message) = &notification.last_assistant_message {
+            println!("Codex notify ({event_type}): {last_message}");
+        } else if let Some(inputs) = &notification.input_messages {
+            println!("Codex notify ({event_type}): {}", inputs.join(" "));
+        } else if let Some(thread_id) = &notification.thread_id {
+            println!("Codex notify ({event_type}) for thread {thread_id}");
+        } else {
+            println!("Codex notify ({event_type})");
+        }
     }
 
-    play_notification()
+    play_notification(verbose)
 }
 
-fn play_notification() -> Result<(), Box<dyn Error>> {
-    let mut stream = open_buffered_stream()?;
+fn play_notification(verbose: bool) -> Result<(), Box<dyn Error>> {
+    let mut stream = open_buffered_stream(verbose)?;
     stream.log_on_drop(false);
 
     let sink = Sink::connect_new(stream.mixer());
@@ -77,7 +103,7 @@ fn play_notification() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn open_buffered_stream() -> Result<OutputStream, StreamError> {
+fn open_buffered_stream(verbose: bool) -> Result<OutputStream, StreamError> {
     let mut attempted = false;
 
     for &frames in &STREAM_BUFFER_FRAME_SIZES {
@@ -88,12 +114,14 @@ fn open_buffered_stream() -> Result<OutputStream, StreamError> {
             Ok(stream) => return Ok(stream),
             Err(err) => {
                 attempted = true;
-                eprintln!("Audio stream with {frames} frame buffer rejected: {err}");
+                if verbose {
+                    eprintln!("Audio stream with {frames} frame buffer rejected: {err}");
+                }
             }
         }
     }
 
-    if attempted {
+    if attempted && verbose {
         eprintln!("Falling back to default audio buffer size");
     }
 
