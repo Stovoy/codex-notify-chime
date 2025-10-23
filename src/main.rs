@@ -1,10 +1,12 @@
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::cpal::BufferSize;
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, StreamError};
 use serde::Deserialize;
 use std::error::Error;
 use std::io::Cursor;
 
 // Embedded MP3 audio so we do not depend on external files at runtime.
 const NOTIFICATION_AUDIO: &[u8] = include_bytes!("../assets/notify.mp3");
+const STREAM_BUFFER_FRAME_SIZES: [u32; 3] = [16_384, 8_192, 4_096];
 
 #[derive(Deserialize)]
 struct Notification {
@@ -64,11 +66,36 @@ fn play_sound_for_event(notification: &Notification) -> Result<(), Box<dyn Error
 }
 
 fn play_notification() -> Result<(), Box<dyn Error>> {
-    let (_stream, stream_handle) = OutputStream::try_default()?;
-    let sink = Sink::try_new(&stream_handle)?;
-    let source = Decoder::new(Cursor::new(NOTIFICATION_AUDIO))?;
+    let mut stream = open_buffered_stream()?;
+    stream.log_on_drop(false);
+
+    let sink = Sink::connect_new(stream.mixer());
+    let source = Decoder::new(Cursor::new(NOTIFICATION_AUDIO))?.buffered();
 
     sink.append(source);
     sink.sleep_until_end();
     Ok(())
+}
+
+fn open_buffered_stream() -> Result<OutputStream, StreamError> {
+    let mut attempted = false;
+
+    for &frames in &STREAM_BUFFER_FRAME_SIZES {
+        match OutputStreamBuilder::from_default_device()
+            .map(|builder| builder.with_buffer_size(BufferSize::Fixed(frames)))
+            .and_then(|builder| builder.open_stream())
+        {
+            Ok(stream) => return Ok(stream),
+            Err(err) => {
+                attempted = true;
+                eprintln!("Audio stream with {frames} frame buffer rejected: {err}");
+            }
+        }
+    }
+
+    if attempted {
+        eprintln!("Falling back to default audio buffer size");
+    }
+
+    OutputStreamBuilder::open_default_stream()
 }
