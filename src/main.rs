@@ -66,10 +66,7 @@ fn parse_args() -> Result<(String, bool), String> {
     Ok((notification_json, verbose))
 }
 
-fn play_sound_for_event(
-    notification: &Notification,
-    verbose: bool,
-) -> Result<(), Box<dyn Error>> {
+fn play_sound_for_event(notification: &Notification, verbose: bool) -> Result<(), Box<dyn Error>> {
     let event_type = notification.kind.as_str();
 
     if verbose && event_type != "agent-turn-complete" {
