@@ -33,7 +33,7 @@ fn main() {
 fn run() -> Result<(), Box<dyn Error>> {
     let notification_json = std::env::args().nth(1).ok_or_else(|| {
         String::from(
-            "Usage: codex-notify <NOTIFICATION_JSON>\n\
+            "Usage: codex-notify-chime <NOTIFICATION_JSON>\n\
              Expected Codex to invoke this binary with a single JSON argument.",
         )
     })?;
