@@ -9,6 +9,11 @@ Codex Notify Chime is a tiny Rust utility that plays a cheerful alert whenever t
 
 ## Prerequisites
 - Rust toolchain (edition 2024 or newer) installed via [rustup](https://rustup.rs/).
+- To get this to work in WSL, install ALSA development headers (and pkg-config if missing):
+  ```bash
+  sudo apt update
+  sudo apt install pkg-config libasound2-dev
+  ```
 
 ## Install
 ```bash
