@@ -3,6 +3,8 @@ use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source, StreamErro
 use serde::Deserialize;
 use std::error::Error;
 use std::io::Cursor;
+use std::path::PathBuf;
+use std::{env, fs};
 
 // Embedded MP3 audio so we do not depend on external files at runtime.
 const NOTIFICATION_AUDIO: &[u8] = include_bytes!("../assets/notify.mp3");
@@ -20,6 +22,16 @@ struct Notification {
     input_messages: Option<Vec<String>>,
 }
 
+#[derive(Deserialize)]
+struct AppConfig {
+    volume: Option<f32>,
+}
+
+#[derive(Copy, Clone)]
+struct PlaybackPreferences {
+    volume: f32,
+}
+
 fn main() {
     std::process::exit(match run() {
         Ok(()) => 0,
@@ -32,11 +44,12 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let (notification_json, verbose) = parse_args()?;
+    let playback_preferences = load_playback_preferences(verbose);
 
     let notification: Notification = serde_json::from_str(&notification_json)
         .map_err(|err| format!("Failed to parse notify payload as JSON: {err}"))?;
 
-    play_sound_for_event(&notification, verbose)?;
+    play_sound_for_event(&notification, verbose, playback_preferences)?;
     Ok(())
 }
 
@@ -66,7 +79,11 @@ fn parse_args() -> Result<(String, bool), String> {
     Ok((notification_json, verbose))
 }
 
-fn play_sound_for_event(notification: &Notification, verbose: bool) -> Result<(), Box<dyn Error>> {
+fn play_sound_for_event(
+    notification: &Notification,
+    verbose: bool,
+    playback_preferences: PlaybackPreferences,
+) -> Result<(), Box<dyn Error>> {
     let event_type = notification.kind.as_str();
 
     if verbose && event_type != "agent-turn-complete" {
@@ -85,16 +102,20 @@ fn play_sound_for_event(notification: &Notification, verbose: bool) -> Result<()
         }
     }
 
-    play_notification(verbose)
+    play_notification(verbose, playback_preferences)
 }
 
-fn play_notification(verbose: bool) -> Result<(), Box<dyn Error>> {
+fn play_notification(
+    verbose: bool,
+    playback_preferences: PlaybackPreferences,
+) -> Result<(), Box<dyn Error>> {
     let mut stream = open_buffered_stream(verbose)?;
     stream.log_on_drop(false);
 
     let sink = Sink::connect_new(stream.mixer());
     let source = Decoder::new(Cursor::new(NOTIFICATION_AUDIO))?.buffered();
 
+    sink.set_volume(playback_preferences.volume);
     sink.append(source);
     sink.sleep_until_end();
     Ok(())
@@ -123,4 +144,54 @@ fn open_buffered_stream(verbose: bool) -> Result<OutputStream, StreamError> {
     }
 
     OutputStreamBuilder::open_default_stream()
+}
+
+fn load_playback_preferences(verbose: bool) -> PlaybackPreferences {
+    let default = PlaybackPreferences { volume: 1.0 };
+    let home = match env::var("HOME") {
+        Ok(home) => PathBuf::from(home),
+        Err(err) => {
+            if verbose {
+                eprintln!("HOME environment variable not set; using default volume ({err})");
+            }
+            return default;
+        }
+    };
+
+    let config_path = home.join(".codex").join("notify.toml");
+    let contents = match fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(err) => {
+            if verbose {
+                eprintln!("Unable to read config at {}: {err}", config_path.display());
+            }
+            return default;
+        }
+    };
+
+    let parsed: AppConfig = match toml::from_str(&contents) {
+        Ok(config) => config,
+        Err(err) => {
+            if verbose {
+                eprintln!(
+                    "Failed to parse TOML config at {}: {err}",
+                    config_path.display()
+                );
+            }
+            return default;
+        }
+    };
+
+    match parsed.volume.filter(|volume| (0.0..=1.0).contains(volume)) {
+        Some(volume) => PlaybackPreferences { volume },
+        None => {
+            if verbose {
+                eprintln!(
+                    "Volume missing or out of range in {} (expected 0.0-1.0); using full volume",
+                    config_path.display()
+                );
+            }
+            default
+        }
+    }
 }

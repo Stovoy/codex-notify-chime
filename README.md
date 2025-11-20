@@ -26,6 +26,15 @@ notify = ["codex-notify-chime"]
 ```
 Codex will now launch the notifier automatically for every agent notification, so there is no need to call the binary manually.
 
+### Optional: Configure Volume
+Create `~/.codex/notify.toml` to set playback volume between `0.0` (mute) and `1.0` (full volume). Example for 5% volume:
+
+```toml
+volume = 0.05
+```
+
+If the file is missing or the value is out of range, the chime plays at 100% volume by default.
+
 ## Build & Run
 ```bash
 cargo run --release -- \
