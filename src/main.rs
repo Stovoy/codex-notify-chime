@@ -32,6 +32,11 @@ struct PlaybackPreferences {
     volume: f32,
 }
 
+enum InvocationMode {
+    Notification(String),
+    Test,
+}
+
 fn main() {
     std::process::exit(match run() {
         Ok(()) => 0,
@@ -43,40 +48,68 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let (notification_json, verbose) = parse_args()?;
+    let (mode, verbose) = parse_args()?;
     let playback_preferences = load_playback_preferences(verbose);
 
-    let notification: Notification = serde_json::from_str(&notification_json)
-        .map_err(|err| format!("Failed to parse notify payload as JSON: {err}"))?;
+    match mode {
+        InvocationMode::Notification(notification_json) => {
+            let notification: Notification = serde_json::from_str(&notification_json)
+                .map_err(|err| format!("Failed to parse notify payload as JSON: {err}"))?;
 
-    play_sound_for_event(&notification, verbose, playback_preferences)?;
-    Ok(())
+            play_sound_for_event(&notification, verbose, playback_preferences)?;
+            Ok(())
+        }
+        InvocationMode::Test => {
+            if verbose {
+                println!("Playing test chime");
+            }
+
+            play_notification(verbose, playback_preferences)
+        }
+    }
 }
 
-fn parse_args() -> Result<(String, bool), String> {
+fn parse_args() -> Result<(InvocationMode, bool), String> {
     let mut args = std::env::args().skip(1).peekable();
     let mut verbose = false;
+    let mut test_mode = false;
 
-    if matches!(args.peek(), Some(flag) if flag.as_str() == "--verbose") {
-        verbose = true;
-        args.next();
+    while let Some(flag) = args.peek() {
+        match flag.as_str() {
+            "--verbose" => {
+                verbose = true;
+                args.next();
+            }
+            "--test" => {
+                test_mode = true;
+                args.next();
+            }
+            _ => break,
+        }
     }
 
-    let notification_json = args.next().ok_or_else(|| {
-        String::from(
-            "Usage: codex-notify-chime [--verbose] <NOTIFICATION_JSON>\n\
-             Expected Codex to invoke this binary with a single JSON argument.",
-        )
-    })?;
+    if test_mode {
+        if args.next().is_some() {
+            return Err(usage());
+        }
+
+        return Ok((InvocationMode::Test, verbose));
+    }
+
+    let notification_json = args.next().ok_or_else(usage)?;
 
     if args.next().is_some() {
-        return Err(String::from(
-            "Usage: codex-notify-chime [--verbose] <NOTIFICATION_JSON>\n\
-             Expected Codex to invoke this binary with a single JSON argument.",
-        ));
+        return Err(usage());
     }
 
-    Ok((notification_json, verbose))
+    Ok((InvocationMode::Notification(notification_json), verbose))
+}
+
+fn usage() -> String {
+    String::from(
+        "Usage: codex-notify-chime [--verbose] (--test | <NOTIFICATION_JSON>)\n\
+         Use --test to play the chime without needing a notification payload.",
+    )
 }
 
 fn play_sound_for_event(

@@ -36,6 +36,12 @@ volume = 0.05
 If the file is missing or the value is out of range, the chime plays at 100% volume by default.
 
 ## Build & Run
+Play a quick test chime:
+```bash
+cargo run --release -- --test
+```
+
+Or pass a full notification payload:
 ```bash
 cargo run --release -- \
   '{"type":"agent-turn-complete","last-assistant-message":"All tasks complete!"}'
